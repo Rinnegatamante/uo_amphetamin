@@ -68,17 +68,39 @@ int holdButtons(SceCtrlData *pad, uint32_t buttons, uint64_t time) {
  * to always reschedule our threads instead of main one
  */
 volatile int term_stubs = 0;
-int stub_thread(SceSize args, void *argp){
-	for (;;){if (term_stubs) sceKernelExitDeleteThread(0);}	
+int dummy_thread(SceSize args, void *argp){
+	for (;;){
+		if (term_stubs) sceKernelExitDeleteThread(0);
+	}
+	SceKernelThreadInfo main_thread;
+	main_thread.size = sizeof(SceKernelThreadInfo);
+	sceKernelGetThreadInfo(0x40010003, &main_thread);
+	sceKernelChangeThreadPriority(0x40010003, main_thread.initPriority);
 }
 void pauseMainThread(){
 	sceKernelChangeThreadPriority(0, 0x0);
 	int i;
 	term_stubs = 0;
 	for (i=0;i<2;i++){
-		SceUID thid = sceKernelCreateThread("thread", stub_thread, 0x0, 0x40000, 0, 0, NULL);
+		SceUID thid = sceKernelCreateThread("dummy thread", dummy_thread, 0x0, 0x40000, 0, 0, NULL);
 		if (thid >= 0)
 			sceKernelStartThread(thid, 0, NULL);
+	}
+	SceKernelThreadInfo main_thread;
+	for(;;){
+		main_thread.size = sizeof(SceKernelThreadInfo);
+		sceKernelGetThreadInfo(0x40010003, &main_thread);
+		sceKernelChangeThreadPriority(0x40010003, 0x7F);
+		if (main_thread.status == SCE_THREAD_RUNNING){
+			term_stubs = 1;
+			sceKernelDelayThread(1000);
+			term_stubs = 0;
+			for (i=0;i<2;i++){
+				SceUID thid = sceKernelCreateThread("dummy thread", dummy_thread, 0x0, 0x40000, 0, 0, NULL);
+				if (thid >= 0)
+					sceKernelStartThread(thid, 0, NULL);
+			}
+		}else break;
 	}
 }
 void resumeMainThread(){
@@ -111,7 +133,7 @@ int blit_thread(SceSize args, void *argp) {
 			pauseMainThread();			
 		}
 
-		if (menu_open) {
+		if (menu_open){
 			if (pressed_buttons & SCE_CTRL_SELECT){
 				menu_open = 0;
 				resumeMainThread();
